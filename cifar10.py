@@ -11,7 +11,39 @@ TF_LOCAL1_STR = 'local1'
 TF_LOCAL2_STR = 'local2'
 TF_SOFTMAX_STR = 'softmax'
 
+image_size = 24
 batch_size = 128
+learning_rate = 0.01
+dropout = (True,0.5)
+
+CONV1_SHAPE = [5,5,3,64]
+CONV2_SHAPE = [5,5,64,128]
+CONV_STRIDE = [1,1,1,1]
+POOL1_SHAPE = [1,3,3,1]
+POOL2_SHAPE = [1,3,3,1]
+POOL_STRIDE = [1,2,2,1]
+
+def get_last_2d_output_size():
+    '''
+    This method calculates the size of the final 2D output
+    just before the fully connected layers
+    This assumes that padding type is 'SAME' for convolution and pooling
+    and assumes size = width = height (that inputs are square)
+    :return: size of the last 2d output
+    '''
+    last_output_size = image_size
+    last_output_size = int(last_output_size/CONV_STRIDE[1]) # stride from conv1
+    last_output_size = int(last_output_size/POOL_STRIDE[1]) # stride by pool1
+    last_output_size = int(last_output_size/CONV_STRIDE[1]) # stride from conv2
+    last_output_size = int(last_output_size/POOL_STRIDE[1]) # stride by pool2
+
+    return last_output_size
+
+FC1_IN = get_last_2d_output_size()**2 * CONV2_SHAPE[-1]
+FC1_OUT = 512
+FC2_IN = 512
+FC2_OUT = 256
+OUT_CLASSES = 10
 
 def initialize_cnn():
     param_list = []
@@ -20,48 +52,47 @@ def initialize_cnn():
 
     with tf.variable_scope(TF_CONV1_STR) as scope:
         param_list.append(tf.get_variable(
-            name=TF_WEIGHTS_STR,initializer=tf.truncated_normal([5,5,3,64], stddev=0.02),dtype=tf.float32)
+            name=TF_WEIGHTS_STR,initializer=tf.truncated_normal(CONV1_SHAPE, stddev=0.02),dtype=tf.float32)
         )
         param_list.append(
-            tf.get_variable(name=TF_BIAS_STR,initializer=tf.zeros(shape=[64],dtype=tf.float32),dtype=tf.float32)
+            tf.get_variable(name=TF_BIAS_STR,initializer=tf.zeros(shape=CONV1_SHAPE[-1],dtype=tf.float32),dtype=tf.float32)
         )
-
 
     with tf.variable_scope(TF_CONV2_STR) as scope:
         param_list.append(tf.get_variable(
-            name=TF_WEIGHTS_STR, initializer=tf.truncated_normal([5, 5, 64, 128], stddev=0.02), dtype=tf.float32)
+            name=TF_WEIGHTS_STR, initializer=tf.truncated_normal(CONV2_SHAPE, stddev=0.02), dtype=tf.float32)
         )
         param_list.append(
-            tf.get_variable(name=TF_BIAS_STR, initializer=tf.zeros(shape=[128], dtype=tf.float32), dtype=tf.float32)
+            tf.get_variable(name=TF_BIAS_STR, initializer=tf.zeros(shape=CONV2_SHAPE[-1], dtype=tf.float32), dtype=tf.float32)
         )
 
     with tf.variable_scope(TF_LOCAL1_STR) as scope:
         param_list.append(tf.get_variable(
-            name=TF_WEIGHTS_STR,initializer=tf.truncated_normal([cnn_hyps[op]['in'], 512],stddev=0.01),
+            name=TF_WEIGHTS_STR,initializer=tf.truncated_normal([FC1_IN, FC1_OUT],stddev=0.01),
             dtype=tf.float32)
         )
         param_list.append(tf.get_variable(
-            initializer=tf.constant(np.random.random() * 0.001, shape=[512]),
+            initializer=tf.constant(np.random.random() * 0.001, shape=[FC1_OUT]),
             name=TF_BIAS_STR, dtype=tf.float32)
         )
 
     with tf.variable_scope(TF_LOCAL2_STR) as scope:
         param_list.append(tf.get_variable(
-            name=TF_WEIGHTS_STR,initializer=tf.truncated_normal([512, 256],stddev=0.01),
+            name=TF_WEIGHTS_STR,initializer=tf.truncated_normal([FC2_IN, FC2_OUT],stddev=0.01),
             dtype=tf.float32)
         )
         param_list.append(tf.get_variable(
-            initializer=tf.constant(np.random.random() * 0.001, shape=[256]),
+            initializer=tf.constant(np.random.random() * 0.001, shape=[FC2_OUT]),
             name=TF_BIAS_STR, dtype=tf.float32)
         )
 
     with tf.variable_scope(TF_SOFTMAX_STR) as scope:
         param_list.append(tf.get_variable(
-            name=TF_WEIGHTS_STR, initializer=tf.truncated_normal([256, 10], stddev=0.01),
+            name=TF_WEIGHTS_STR, initializer=tf.truncated_normal([FC2_OUT, OUT_CLASSES], stddev=0.01),
             dtype=tf.float32)
         )
         param_list.append(tf.get_variable(
-            initializer=tf.constant(np.random.random() * 0.001, shape=[10]),
+            initializer=tf.constant(np.random.random() * 0.001, shape=[OUT_CLASSES]),
             name=TF_BIAS_STR, dtype=tf.float32)
         )
 
@@ -77,25 +108,23 @@ def inference(dataset):
     #need to calculate the output according to the layers we have
     with tf.variable_scope(TF_CONV1_STR):
         w,b = tf.get_variable(TF_WEIGHTS_STR),tf.get_variable(TF_BIAS_STR)
-        logger.debug('\tConvolving (%s) With Weights:%s Stride:%s'%(op,cnn_hyperparameters[op]['weights'],cnn_hyperparameters[op]['stride']))
+        logger.debug('\tConvolving with Weights:%s Stride:%s'%(CONV1_SHAPE,CONV_STRIDE))
         x = tf.nn.conv2d(x, w, [1,1,1,1], padding='SAME')
         x = tf.nn.relu(x + b)
         #logger.debug('\t\tX after %s:%s'%tf.shape(weights[op]).eval())
 
-        logger.debug('\tPooling (%s) with Kernel:%s Stride:%s'%(op,cnn_hyperparameters[op]['kernel'],cnn_hyperparameters[op]['stride']))
+        logger.debug('\tPooling with Kernel:%s Stride:%s'%(POOL1_SHAPE,POOL_STRIDE))
         x = tf.nn.max_pool(x,ksize=[1,3,3,1],strides=[1,2,2,1],padding='SAME')
         #logger.debug('\t\tX after %s:%s'%(op,tf.shape(x).eval()))
 
     with tf.variable_scope(TF_CONV2_STR):
         w, b = tf.get_variable(TF_WEIGHTS_STR), tf.get_variable(TF_BIAS_STR)
-        logger.debug('\tConvolving (%s) With Weights:%s Stride:%s' % (
-        op, cnn_hyperparameters[op]['weights'], cnn_hyperparameters[op]['stride']))
+        logger.debug('\tConvolving with Weights:%s Stride:%s' % (CONV2_SHAPE,CONV_STRIDE))
         x = tf.nn.conv2d(x, w, [1, 1, 1, 1], padding='SAME')
         x = tf.nn.relu(x + b)
         # logger.debug('\t\tX after %s:%s'%tf.shape(weights[op]).eval())
 
-        logger.debug('\tPooling (%s) with Kernel:%s Stride:%s' % (
-        op, cnn_hyperparameters[op]['kernel'], cnn_hyperparameters[op]['stride']))
+        logger.debug('\tPooling with Kernel:%s Stride:%s'%(POOL1_SHAPE,POOL_STRIDE))
         x = tf.nn.max_pool(x, ksize=[1, 3, 3, 1], strides=[1, 2, 2, 1], padding='SAME')
 
     with tf.variable_scope(TF_LOCAL1_STR):
@@ -103,7 +132,7 @@ def inference(dataset):
         # we need to reshape the output of last subsampling layer to
         # convert 4D output to a 2D input to the hidden layer
         # e.g subsample layer output [batch_size,width,height,depth] -> [batch_size,width*height*depth]
-        logger.debug('Input size of fulcon_out : %d', cnn_hyperparameters[op]['in'])
+        logger.debug('Input size of FC1 : %d', FC1_IN)
         input_shape = x.get_shape().aslist()
         x = tf.reshape(x, [batch_size, input_shape[1]*input_shape[2]*input_shape[3]])
         x = tf.nn.relu(tf.matmul(x, w) + b)
@@ -119,9 +148,9 @@ def inference(dataset):
     return x
 
 
-def tower_loss(logits,labels,weighted=False,tf_data_weights=None):
-    # Training computation.
-    if include_l2_loss:
+def tower_loss(logits,labels):
+    # Computing loss
+
         loss = tf.reduce_mean(tf.nn.softmax_cross_entropy_with_logits(logits, labels)) + \
                (beta/2)*tf.reduce_sum([tf.nn.l2_loss(w) if 'fulcon' in kw or 'conv' in kw else 0 for kw,w in weights.items()])
     else:
@@ -131,33 +160,9 @@ def tower_loss(logits,labels,weighted=False,tf_data_weights=None):
     return loss
 
 
-def optimize_with_momenutm_func(loss, global_step, learning_rate):
-    global tf_weight_vels,tf_bias_vels
-    vel_update_ops, optimize_ops = [],[]
+def optimize_with_momenutm(optimizer, loss, global_step, learning_rate):
 
-    if research_parameters['adapt_structure'] or research_parameters['use_custom_momentum_opt']:
-        # custom momentum optimizing
-        # apply_gradient([g,v]) does the following v -= eta*g
-        # eta is learning_rate
-        # Since what we need is
-        # v(t+1) = mu*v(t) - eta*g
-        # theta(t+1) = theta(t) + v(t+1) --- (2)
-        # we form (2) in the form v(t+1) = mu*v(t) + eta*g
-        # theta(t+1) = theta(t) - v(t+1)
-        optimizer = tf.train.GradientDescentOptimizer(learning_rate=1.0)
-
-        for op in tf_weight_vels.keys():
-            [(grads_w,w),(grads_b,b)] = optimizer.compute_gradients(loss, [weights[op], biases[op]])
-
-            # update velocity vector
-            vel_update_ops.append(tf.assign(tf_weight_vels[op], research_parameters['momentum']*tf_weight_vels[op] + grads_w))
-            vel_update_ops.append(tf.assign(tf_bias_vels[op], research_parameters['momentum']*tf_bias_vels[op] + grads_b))
-
-            optimize_ops.append(optimizer.apply_gradients(
-                        [(tf_weight_vels[op]*learning_rate,weights[op]),(tf_bias_vels[op]*learning_rate,biases[op])]
-            ))
-    else:
-        optimize_ops.append(
+    optimize_ops.append(
             tf.train.MomentumOptimizer(learning_rate=learning_rate,
                                        momentum=research_parameters['momentum']).minimize(loss))
 
